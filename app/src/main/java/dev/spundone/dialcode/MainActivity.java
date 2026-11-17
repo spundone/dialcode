@@ -2,8 +2,6 @@ package dev.spundone.dialcode;
 
 import android.app.Activity;
 import android.content.SharedPreferences;
-import android.app.RemoteInput;
-import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -55,9 +53,8 @@ public final class MainActivity extends Activity {
     /** Setup key page state. The key is typed on Dialcode's own keypad so no keyboard app ever sees it. */
     private String typedName = "";
     private final StringBuilder typedKey = new StringBuilder();
-    /** Page to reopen after returning from the system text input screen. */
-    private String resumePage;
-    private static final int REQ_NAME = 1;
+    /** Which setup key field the keypad types into. */
+    private boolean editName = true;
 
     private static final String STEP_WELCOME = "welcome", STEP_METHOD = "method", STEP_MAC = "mac",
             STEP_KEY = "key", STEP_TILES = "tiles", STEP_DONE = "done";
@@ -166,32 +163,6 @@ public final class MainActivity extends Activity {
                 show(step);
             }
         }
-        if (resumePage != null && accounts != null) show(resumePage);
-        resumePage = null;
-    }
-
-    @Override
-    protected void onActivityResult(int request, int result, Intent data) {
-        super.onActivityResult(request, result, data);
-        if (request != REQ_NAME || data == null) return;
-        android.os.Bundle r = RemoteInput.getResultsFromIntent(data);
-        CharSequence name = r == null ? null : r.getCharSequence("name");
-        if (name != null) typedName = name.toString().trim();
-    }
-
-    /** Opens the watch's own text input (keyboard, voice, handwriting) for the account name. */
-    private void askName() {
-        RemoteInput in = new RemoteInput.Builder("name").setLabel("Account name").build();
-        Intent i = new Intent("android.support.wearable.input.action.REMOTE_INPUT");
-        i.putExtra("android.support.wearable.input.extra.REMOTE_INPUTS", new RemoteInput[] {in});
-        i.putExtra("android.support.wearable.input.extra.TITLE", "Account name");
-        resumePage = STEP_KEY;
-        try {
-            startActivityForResult(i, REQ_NAME);
-        } catch (android.content.ActivityNotFoundException e) {
-            resumePage = null;
-            notice = "This watch has no text input.";
-        }
     }
 
     @Override
@@ -203,7 +174,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (resumePage == null) clearTyped();
+        clearTyped();
         closeSheet();
         // Drop secrets and codes from memory and the view tree while off screen.
         rows.clear();
@@ -339,18 +310,25 @@ public final class MainActivity extends Activity {
                 break;
             case STEP_KEY:
                 box = openSheet("Type a setup key");
-                TextView name = field(typedName.isEmpty() ? "Name, e.g. GitHub" : typedName, !typedName.isEmpty());
-                name.setOnClickListener(v -> askName());
+                TextView name = field(typedName.isEmpty() ? "Name, e.g. GitHub" : typedName, !typedName.isEmpty(), editName);
+                name.setOnClickListener(v -> {
+                    editName = true;
+                    show(STEP_KEY);
+                });
                 box.addView(name, wrap(6));
-                TextView key = field(typedKey.length() == 0 ? "Setup key" : groupKey(), typedKey.length() > 0);
+                TextView key = field(typedKey.length() == 0 ? "Setup key" : groupKey(), typedKey.length() > 0, !editName);
                 key.setTypeface(Typeface.MONOSPACE);
                 key.setMaxLines(4);
+                key.setOnClickListener(v -> {
+                    editName = false;
+                    show(STEP_KEY);
+                });
                 box.addView(key, wrap(8));
                 TextView err = text("", 12, pal.error, 500);
                 err.setGravity(Gravity.CENTER);
                 err.setVisibility(android.view.View.GONE);
                 box.addView(err, wrap(6));
-                addKeypad(box, key);
+                addKeypad(box, editName ? name : key);
                 box.addView(body("Use the text key a site shows under its QR code. Codes are 6 digits every 30 seconds."), wrap(10));
                 box.addView(pill("Add", pal.primary, pal.onPrimary, v -> addTyped(err)), wrap(6));
                 box.addView(pill("Back", pal.surfaceContainerHigh, pal.onSurface, v -> {
@@ -446,6 +424,7 @@ public final class MainActivity extends Activity {
     }
 
     private void clearTyped() {
+        editName = true;
         typedName = "";
         typedKey.setLength(0);
     }
@@ -459,9 +438,13 @@ public final class MainActivity extends Activity {
         return b.toString();
     }
 
-    /** Base32 keypad: A to Z, 2 to 7 and backspace, six keys a row. */
+    /**
+     * In-app keypad, so no keyboard app sees what is typed. For the key: Base32 (A to Z, 2 to 7). For the
+     * name: letters, digits and space, with the first letter of each word capitalised.
+     */
     private void addKeypad(LinearLayout box, TextView display) {
-        String keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567\b";
+        boolean forName = editName;
+        String keys = forName ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \b" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567\b";
         LinearLayout row = null;
         for (int i = 0; i < keys.length(); i++) {
             if (i % 6 == 0) {
@@ -471,20 +454,33 @@ public final class MainActivity extends Activity {
             }
             char c = keys.charAt(i);
             boolean del = c == '\b';
-            TextView k = text(del ? "⌫" : String.valueOf(c), 16, del ? pal.onPrimaryContainer : pal.onSurface, 600);
+            String label = del ? "⌫" : c == ' ' ? "␣" : String.valueOf(c);
+            TextView k = text(label, 16, del ? pal.onPrimaryContainer : pal.onSurface, 600);
             k.setGravity(Gravity.CENTER);
             k.setMinHeight(dp(40));
             int bg = del ? pal.primaryContainer : pal.surfaceContainerHigh;
             k.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), shape(bg, 14), shape(0xFFFFFFFF, 14)));
             k.setOnClickListener(v -> {
-                if (del) {
-                    if (typedKey.length() > 0) typedKey.setLength(typedKey.length() - 1);
-                } else if (typedKey.length() < 128) {
-                    typedKey.append(c);
+                if (forName) {
+                    if (del) {
+                        if (!typedName.isEmpty()) typedName = typedName.substring(0, typedName.length() - 1);
+                    } else if (typedName.length() < 40) {
+                        boolean wordStart = typedName.isEmpty() || typedName.endsWith(" ");
+                        if (!(c == ' ' && wordStart)) typedName += wordStart ? c : Character.toLowerCase(c);
+                    }
+                    boolean empty = typedName.isEmpty();
+                    display.setText(empty ? "Name, e.g. GitHub" : typedName);
+                    display.setTextColor(empty ? pal.outline : pal.onSurface);
+                } else {
+                    if (del) {
+                        if (typedKey.length() > 0) typedKey.setLength(typedKey.length() - 1);
+                    } else if (typedKey.length() < 128) {
+                        typedKey.append(c);
+                    }
+                    boolean empty = typedKey.length() == 0;
+                    display.setText(empty ? "Setup key" : groupKey());
+                    display.setTextColor(empty ? pal.outline : pal.onSurface);
                 }
-                boolean empty = typedKey.length() == 0;
-                display.setText(empty ? "Setup key" : groupKey());
-                display.setTextColor(empty ? pal.outline : pal.onSurface);
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             lp.setMargins(dp(2), 0, dp(2), 0);
@@ -499,16 +495,18 @@ public final class MainActivity extends Activity {
         return t;
     }
 
-    /** A tappable field-shaped label. */
-    private TextView field(String value, boolean filled) {
+    /** A tappable field-shaped label; the one the keypad types into gets a primary outline. */
+    private TextView field(String value, boolean filled, boolean active) {
         TextView t = text(value, 14, filled ? pal.onSurface : pal.outline, 500);
         t.setGravity(Gravity.CENTER);
         t.setMinHeight(dp(48));
         t.setPadding(dp(18), dp(10), dp(18), dp(10));
-        t.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), shape(pal.surfaceContainerHigh, 24),
-                shape(0xFFFFFFFF, 24)));
+        GradientDrawable bg = shape(pal.surfaceContainerHigh, 24);
+        if (active) bg.setStroke(dp(2), pal.primary);
+        t.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, shape(0xFFFFFFFF, 24)));
         return t;
     }
+
 
 
     private LinearLayout card(int color) {
