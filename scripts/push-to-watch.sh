@@ -38,7 +38,16 @@ case "$FILE" in *.json) EXT=json ;; *) EXT=txt ;; esac
 DEST="/sdcard/Android/data/$PKG/files/$MODE"
 NAME="push-$(date +%s).$EXT"
 
-adb shell mkdir -p "$DEST" </dev/null
+# The app must create its own drop folders: a folder made by adb's shell user can't be read by the app.
+if ! adb shell "[ -d $DEST ]" </dev/null; then
+  adb shell am start -n "$PKG/dev.spundone.dialcode.MainActivity" </dev/null >/dev/null 2>&1
+  i=0
+  while ! adb shell "[ -d $DEST ]" </dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
+  if ! adb shell "[ -d $DEST ]" </dev/null; then
+    echo "Dialcode hasn't set up its folders yet. Unlock the watch, open Dialcode once, then run this again."
+    exit 1
+  fi
+fi
 adb push "$FILE" "$DEST/$NAME" </dev/null >/dev/null 2>&1
 adb shell am start -n "$PKG/dev.spundone.dialcode.MainActivity" </dev/null >/dev/null 2>&1
 if [ "$MODE" = sync ]; then

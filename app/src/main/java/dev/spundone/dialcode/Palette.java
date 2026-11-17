@@ -3,37 +3,26 @@ package dev.spundone.dialcode;
 import android.content.Context;
 
 /**
- * Material 3 Expressive dark color roles. Read from the system's dynamic palette (Android 12+
- * system_accent / system_neutral tones), so the app follows the watch theme where One UI provides one.
+ * Material 3 Expressive dark color roles: a fixed mint scheme with amber accents, tuned for an AMOLED
+ * watch. Fixed rather than read from the system palette, because One UI Watch's dynamic tones are
+ * low-chroma and wash the codes out. Tones follow the M3 dark mapping (80 / 20 / 30 / 90).
  */
 final class Palette {
     final int background = 0xFF000000;
-    final int primary;            // accent1 200
-    final int onPrimary;          // accent1 800
-    final int primaryContainer;   // accent1 700
-    final int onPrimaryContainer; // accent1 100
-    final int tertiaryContainer;  // accent3 700
-    final int onTertiaryContainer;// accent3 100
-    final int surfaceContainer;   // neutral2 800 (tonal card)
-    final int surfaceContainerHigh;
-    final int onSurface;          // neutral1 50
-    final int onSurfaceVariant;   // neutral2 200
-    final int outline;            // neutral2 600
-    final int error = 0xFFFFB4AB;          // M3 dark error roles (no dynamic error tones on Android)
+    final int primary = 0xFF5FE3B4;             // mint T80, slightly boosted chroma
+    final int onPrimary = 0xFF00382A;           // T20
+    final int primaryContainer = 0xFF00513D;    // T30
+    final int onPrimaryContainer = 0xFF8FF8CF;  // T90
+    final int tertiaryContainer = 0xFF5A4300;   // amber T30, for notices
+    final int onTertiaryContainer = 0xFFFFDF9C; // amber T90
+    final int surfaceContainer = 0xFF161D1A;    // neutral (mint-tinted) T10
+    final int surfaceContainerHigh = 0xFF232B27;// T16
+    final int onSurface = 0xFFE6EEEA;           // T93
+    final int onSurfaceVariant = 0xFFB4C4BC;    // neutral-variant T78
+    final int outline = 0xFF7C8B84;             // T56
+    final int error = 0xFFFF8A7A;               // vivid coral for the last seconds
     final int errorContainer = 0xFF93000A;
     final int onErrorContainer = 0xFFFFDAD6;
 
-    Palette(Context c) {
-        primary = c.getColor(android.R.color.system_accent1_200);
-        onPrimary = c.getColor(android.R.color.system_accent1_800);
-        primaryContainer = c.getColor(android.R.color.system_accent1_700);
-        onPrimaryContainer = c.getColor(android.R.color.system_accent1_100);
-        tertiaryContainer = c.getColor(android.R.color.system_accent3_700);
-        onTertiaryContainer = c.getColor(android.R.color.system_accent3_100);
-        surfaceContainer = c.getColor(android.R.color.system_neutral2_900);
-        surfaceContainerHigh = c.getColor(android.R.color.system_neutral2_800);
-        onSurface = c.getColor(android.R.color.system_neutral1_50);
-        onSurfaceVariant = c.getColor(android.R.color.system_neutral2_200);
-        outline = c.getColor(android.R.color.system_neutral2_600);
-    }
+    Palette(Context c) {}
 }
