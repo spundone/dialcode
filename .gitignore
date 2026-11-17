@@ -1,0 +1,12 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.jks
+*.keystore
+dist/
+.idea/
+*.iml
+# never commit exports
+*.json
+*.otpauth

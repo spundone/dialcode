@@ -1,0 +1,62 @@
+plugins {
+    id 'com.android.application'
+}
+
+def ksPath = System.getenv('DIALCODE_KEYSTORE') ?: "${System.getProperty('user.home')}/.config/dialcode/release.jks"
+def ksPass = System.getenv('DIALCODE_KS_PASS')
+
+android {
+    namespace 'dev.spundone.dialcode'
+    compileSdk 34
+    buildToolsVersion '34.0.0'
+
+    defaultConfig {
+        applicationId 'dev.spundone.dialcode'
+        minSdk 30
+        targetSdk 34
+        versionCode((System.getenv('VERSION_CODE') ?: '1') as int)
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        release {
+            if (ksPass != null) {
+                storeFile file(ksPath)
+                storePassword ksPass
+                keyAlias 'dialcode'
+                keyPassword ksPass
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Screenshot-able preview for UI work. Use generated test secrets only.
+            applicationIdSuffix '.preview'
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (ksPass != null) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures { buildConfig false }
+    packaging {
+        resources.excludes += ['META-INF/**', 'kotlin/**', '**.kotlin_builtins', 'DebugProbesKt.bin']
+    }
+    lint { checkReleaseBuilds false }
+}
+
+dependencies {
+    implementation 'androidx.wear.tiles:tiles:1.4.1'
+    implementation 'androidx.wear.protolayout:protolayout:1.2.1'
+    implementation 'androidx.wear.protolayout:protolayout-expression:1.2.1'
+    implementation 'androidx.concurrent:concurrent-futures:1.2.0'
+}

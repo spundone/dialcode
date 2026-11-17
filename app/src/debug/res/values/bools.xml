@@ -1,0 +1,5 @@
+<resources>
+    <bool name="secure_window">false</bool>
+    <string name="app_name">Dialcode Preview</string>
+    <string name="tile_label">Dialcode Preview codes</string>
+</resources>

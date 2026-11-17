@@ -1,0 +1,4 @@
+<resources>
+    <!-- FLAG_SECURE on code screens. Only the debug preview build (test secrets only) turns it off. -->
+    <bool name="secure_window">true</bool>
+</resources>
