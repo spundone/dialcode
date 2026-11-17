@@ -1,0 +1,163 @@
+#!/bin/sh
+# dialcode: set up Dialcode on a Wear OS watch and sync accounts to it, over adb.
+#
+#   dialcode setup            connect to the watch, install Dialcode and open it
+#   dialcode sync EXPORT      mirror: the watch list becomes exactly this export
+#   dialcode add FILE         merge: only add accounts the watch doesn't have yet
+#   dialcode install [APK]    install or update the app (default: dist/dialcode.apk, else the latest release)
+#   dialcode connect          find the watch on the network and connect adb to it
+#
+# EXPORT is an unencrypted Proton Authenticator export (.json). FILE can also be a text file with one
+# otpauth:// URI per line. Set ANDROID_SERIAL to pick a device when more than one is connected.
+set -eu
+
+PKG="${DIALCODE_PKG:-dev.spundone.dialcode}"
+ACTIVITY="dev.spundone.dialcode.MainActivity"
+REPO="spundone/dialcode"
+# Resolve symlinks by hand: BSD readlink (older macOS) has no -f.
+self="$0"
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+HERE=$(cd "$(dirname "$self")" && pwd)
+
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+say() { printf '%s\n' "$*"; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+need_adb() {
+  command -v adb >/dev/null 2>&1 && return
+  case "$(uname -s)" in
+    Darwin) hint="brew install --cask android-platform-tools" ;;
+    Linux) hint="sudo apt install adb (Debian/Ubuntu), sudo dnf install android-tools (Fedora) or sudo pacman -S android-tools (Arch)" ;;
+    *) hint="download Android SDK Platform-Tools from https://developer.android.com/tools/releases/platform-tools and add it to PATH" ;;
+  esac
+  die "adb isn't installed. Install it with: $hint"
+}
+
+sha256_check() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS >/dev/null
+  else shasum -a 256 -c SHA256SUMS >/dev/null; fi
+}
+
+download() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$1" "$2"
+  else wget -q -O "$1" "$2"; fi
+}
+
+# Prints the serial of the first connected Wear OS device.
+find_watch() {
+  adb devices | awk 'NR > 1 && $2 == "device" {print $1}' | while read -r s; do
+    if adb -s "$s" shell getprop ro.build.characteristics </dev/null 2>/dev/null | grep -q watch; then
+      echo "$s"
+      break
+    fi
+  done
+}
+
+connect() {
+  need_adb
+  if [ -n "${ANDROID_SERIAL:-}" ]; then export ANDROID_SERIAL; return; fi
+  s=$(find_watch)
+  if [ -z "$s" ]; then
+    # Try every wireless-debugging service the watch advertises on the local network.
+    for addr in $(adb mdns services 2>/dev/null | awk '/_adb-tls-connect/ {print $NF}'); do
+      adb connect "$addr" >/dev/null 2>&1 || true
+    done
+    s=$(find_watch)
+  fi
+  if [ -z "$s" ]; then
+    say "No watch found. On the watch, open Settings > Developer options > Wireless debugging."
+    say "If this computer has never connected to it, tap \"Pair new device\" there."
+    printf "Pairing IP address and port shown on the watch (or Enter to skip): "
+    read -r pair || pair=""
+    if [ -n "$pair" ]; then
+      printf "Pairing code: "
+      read -r code || code=""
+      adb pair "$pair" "$code" || die "Pairing failed. Check the code and try again."
+      sleep 2
+      for addr in $(adb mdns services 2>/dev/null | awk '/_adb-tls-connect/ {print $NF}'); do
+        adb connect "$addr" >/dev/null 2>&1 || true
+      done
+      s=$(find_watch)
+    fi
+  fi
+  [ -n "$s" ] || die "Still no watch. Check it's on the same Wi-Fi as this computer with Wireless debugging on, then run: dialcode connect"
+  ANDROID_SERIAL="$s"
+  export ANDROID_SERIAL
+}
+
+installed() { adb shell pm path "$PKG" </dev/null >/dev/null 2>&1; }
+
+open_app() { adb shell am start -n "$PKG/$ACTIVITY" </dev/null >/dev/null 2>&1 || true; }
+
+install_app() {
+  apk="${1:-}"
+  tmp=""
+  if [ -z "$apk" ] && [ -f "$HERE/../dist/dialcode.apk" ]; then apk="$HERE/../dist/dialcode.apk"; fi
+  if [ -z "$apk" ]; then
+    tmp=$(mktemp -d)
+    say "Downloading the latest Dialcode release…"
+    download "$tmp/dialcode.apk" "https://github.com/$REPO/releases/latest/download/dialcode.apk" \
+      || die "Download failed. Get dialcode.apk from https://github.com/$REPO/releases/latest and run: dialcode install dialcode.apk"
+    download "$tmp/SHA256SUMS" "https://github.com/$REPO/releases/latest/download/SHA256SUMS" \
+      || die "Couldn't download SHA256SUMS to check the APK."
+    (cd "$tmp" && sha256_check) || die "The downloaded APK doesn't match SHA256SUMS. Not installing."
+    apk="$tmp/dialcode.apk"
+  fi
+  [ -f "$apk" ] || die "No APK at $apk"
+  adb install -r "$apk" </dev/null >/dev/null || die "Install failed. If it says the signatures don't match, uninstall the old Dialcode first (that deletes its accounts)."
+  [ -z "$tmp" ] || rm -rf "$tmp"
+  say "Dialcode is installed on the watch."
+}
+
+push() {
+  mode="$1"
+  file="$2"
+  [ -f "$file" ] || die "No file at $file"
+  installed || die "Dialcode isn't on the watch yet. Run: dialcode setup"
+  case "$file" in *.json) ext=json ;; *) ext=txt ;; esac
+  dest="/sdcard/Android/data/$PKG/files/$mode"
+  # The app has to create its own drop folders: it can't read a folder made by adb's shell user.
+  if ! adb shell "[ -d $dest ]" </dev/null; then
+    open_app
+    i=0
+    while ! adb shell "[ -d $dest ]" </dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
+    adb shell "[ -d $dest ]" </dev/null || die "Dialcode hasn't set up its folders yet. Unlock the watch, open Dialcode once, then run this again."
+  fi
+  adb push "$file" "$dest/push-$(date +%s).$ext" </dev/null >/dev/null 2>&1 || die "Couldn't copy the file to the watch."
+  open_app
+  if [ "$mode" = sync ]; then
+    say "Sent. Dialcode is opening on the watch and will match this export."
+  else
+    say "Sent. Dialcode is opening on the watch and will add any new accounts."
+  fi
+  say "If the watch is locked, unlock it and open Dialcode. The file waits there until then."
+  printf "Delete %s from this computer now? It holds your 2FA secrets unencrypted. [y/N] " "$file"
+  read -r ans || ans=n
+  case "$ans" in
+    y|Y|yes) rm -f "$file" && say "Deleted." ;;
+    *) say "Kept. Delete it when you're done." ;;
+  esac
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  setup)
+    connect
+    say "Connected to $ANDROID_SERIAL."
+    if installed && [ "${1:-}" != "--reinstall" ]; then say "Dialcode is already installed. Use dialcode install to update it."
+    else install_app ""; fi
+    open_app
+    say "Dialcode is open on the watch. Follow the steps there."
+    say "When it asks for your accounts, export them from Proton Authenticator without a password and run:"
+    say "  dialcode sync ~/Downloads/your-export.json"
+    ;;
+  install) connect; install_app "${1:-}" ;;
+  connect) connect; say "Connected to $ANDROID_SERIAL." ;;
+  sync) [ $# -eq 1 ] || usage; connect; push sync "$1" ;;
+  add) [ $# -eq 1 ] || usage; connect; push import "$1" ;;
+  *) usage ;;
+esac

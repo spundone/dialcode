@@ -164,6 +164,19 @@ final class Account {
         return a;
     }
 
+    /** A TOTP account typed in by hand: SHA1, 6 digits, 30 s, like nearly every site's setup key. */
+    static Account manual(String name, String secret) {
+        Account a = new Account();
+        a.type = TOTP;
+        a.algorithm = "SHA1";
+        a.digits = 6;
+        a.period = 30;
+        a.issuer = name.trim();
+        a.label = "";
+        a.secret = normalise(secret);
+        return a;
+    }
+
     private static String normalise(String secret) {
         // Decode and re-encode so formatting differences (case, spaces, padding) don't create duplicates.
         return Otp.base32Encode(Otp.base32Decode(secret));
