@@ -36,9 +36,11 @@ need_adb() {
   die "adb isn't installed. Install it with: $hint"
 }
 
+# Checks only the APK's line: SHA256SUMS also lists the scripts, which aren't downloaded here.
 sha256_check() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS >/dev/null
-  else shasum -a 256 -c SHA256SUMS >/dev/null; fi
+  grep ' dialcode.apk$' SHA256SUMS > apk.sha256 || return 1
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum -c apk.sha256 >/dev/null
+  else shasum -a 256 -c apk.sha256 >/dev/null; fi
 }
 
 download() {
